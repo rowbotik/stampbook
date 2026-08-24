@@ -1,0 +1,10 @@
+{
+  "source_dir": "source",
+  "output_dir": "output",
+  "database": "stampbook.db",
+  "prompt_file": "prompt.txt",
+  "model": "gpt-image-2",
+  "size": "1024x1024",
+  "quality": "medium",
+  "max_attempts": 3
+}

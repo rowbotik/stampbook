@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stampbook Review Desk</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="masthead">
+    <div>
+      <p class="kicker">Print room / travel archive</p>
+      <h1>Stampbook<br>Review Desk</h1>
+    </div>
+    <div class="summary" aria-live="polite">
+      <span id="progress-count">0 / 0</span>
+      <div class="progress"><i id="progress-bar"></i></div>
+      <small id="worker-state">Ready</small>
+      <small id="key-state" class="key-state">Checking API key…</small>
+    </div>
+  </header>
+
+  <main>
+    <section class="controls" aria-label="Processing controls">
+      <button id="scan-button" class="button secondary">Rescan photos</button>
+      <label>Batch size <input id="batch-limit" type="number" min="1" max="100" value="15"></label>
+      <button id="process-button" class="button primary">Process next</button>
+      <button id="stop-button" class="button stop" disabled>Stop</button>
+      <label>Show
+        <select id="review-filter">
+          <option value="all">All records</option>
+          <option value="unreviewed">Needs review</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+        </select>
+      </label>
+      <span id="message" role="status"></span>
+    </section>
+
+    <section id="empty" class="empty" hidden>
+      <p>No photographs are indexed.</p>
+      <small>Place source files in the configured source folder, then scan.</small>
+    </section>
+    <section id="ledger" class="ledger" aria-label="Stamp jobs"></section>
+  </main>
+
+  <template id="job-template">
+    <article class="job-card">
+      <header>
+        <span class="job-number"></span>
+        <span class="status-pill"></span>
+      </header>
+      <div class="proofs">
+        <figure><img class="source-image" alt=""><figcaption>Source record</figcaption></figure>
+        <figure class="result-figure"><div class="result-placeholder">Awaiting impression</div><img class="result-image" alt=""><figcaption>Stamp proof</figcaption></figure>
+      </div>
+      <div class="job-info">
+        <div><h2 class="filename"></h2><p class="error"></p></div>
+        <textarea class="note" rows="2" placeholder="Correction note for regeneration"></textarea>
+      </div>
+      <footer>
+        <button class="button approve">Approve</button>
+        <button class="button reject">Reject</button>
+        <button class="button regenerate">Queue regeneration</button>
+      </footer>
+    </article>
+  </template>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

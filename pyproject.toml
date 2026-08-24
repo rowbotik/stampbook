@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stampbook"
+version = "0.1.0"
+description = "Resumable photo-to-rubber-stamp batch processor and review desk"
+requires-python = ">=3.11"
+dependencies = [
+  "Flask>=3.0,<4",
+  "openai>=1.0",
+  "Pillow>=10,<12",
+]
+
+[project.optional-dependencies]
+heic = ["pillow-heif>=0.18,<2"]
+test = ["pytest>=8,<9"]
+
+[project.scripts]
+stampbook = "stampbook.cli:main"
+
+[tool.setuptools.package-data]
+stampbook = ["templates/*.html", "static/*.css", "static/*.js"]
+
+[tool.setuptools.packages.find]
+include = ["stampbook*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
