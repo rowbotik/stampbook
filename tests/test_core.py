@@ -3,7 +3,16 @@ from pathlib import Path
 
 from PIL import Image
 
-from stampbook.core import connect, image_edit_parameters, load_config, process_one, process_pending, scan_sources
+from stampbook.core import (
+    build_prompt,
+    connect,
+    get_art_mode,
+    image_edit_parameters,
+    load_config,
+    process_one,
+    process_pending,
+    scan_sources,
+)
 from stampbook.web import create_app
 
 
@@ -128,3 +137,24 @@ def test_queued_job_removed_after_source_disappears(tmp_path):
     with connect(config) as db:
         job = db.execute("SELECT present, status, attempts, error FROM jobs WHERE id = 1").fetchone()
     assert dict(job) == {"present": 0, "status": "missing", "attempts": 0, "error": None}
+
+
+def test_art_mode_defaults_and_persists(tmp_path):
+    config = project(tmp_path)
+    client = create_app(config).test_client()
+    assert get_art_mode(config) == "source"
+    response = client.post("/api/mode", json={"art_mode": "rgb"})
+    assert response.status_code == 200
+    assert response.get_json() == {"art_mode": "rgb"}
+    assert get_art_mode(config) == "rgb"
+    assert client.get("/api/stats").get_json()["art_mode"] == "rgb"
+
+
+def test_rgb_mode_adds_strict_three_ink_prompt(tmp_path):
+    config = project(tmp_path)
+    prompt = build_prompt(config, "", "rgb")
+    assert "exactly three spot inks only" in prompt
+    assert "#FF0000" in prompt
+    assert "#00A000" in prompt
+    assert "#0057FF" in prompt
+    assert "RGB MODE OVERRIDE" not in build_prompt(config, "", "source")

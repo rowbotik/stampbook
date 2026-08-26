@@ -7,6 +7,24 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+  <section class="mode-deck" aria-labelledby="mode-heading">
+    <div class="mode-copy">
+      <p>Art mode</p>
+      <strong id="mode-heading">Source palette</strong>
+      <small id="mode-description">Colors are sampled from each travel photograph.</small>
+    </div>
+    <div class="mode-switch" role="group" aria-label="Choose art mode">
+      <button class="mode-option source-option" data-mode="source" aria-pressed="true">
+        <span>Source palette</span>
+        <small>Photo-derived spot inks</small>
+      </button>
+      <button class="mode-option rgb-option" data-mode="rgb" aria-pressed="false">
+        <span class="rgb-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>RGB</span>
+        <small>Three fixed color passes</small>
+      </button>
+    </div>
+  </section>
   <header class="masthead">
     <div>
       <p class="kicker">Print room / travel archive</p>

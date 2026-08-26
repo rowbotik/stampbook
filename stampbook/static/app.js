@@ -4,6 +4,7 @@ const message = document.querySelector('#message');
 const processButton = document.querySelector('#process-button');
 const stopButton = document.querySelector('#stop-button');
 let wasRunning = false;
+let currentMode = 'source';
 
 async function request(url, options = {}) {
   const response = await fetch(url, {headers: {'Content-Type': 'application/json'}, ...options});
@@ -13,6 +14,18 @@ async function request(url, options = {}) {
 }
 
 function showMessage(text) { message.textContent = text; }
+
+function applyMode(artMode) {
+  currentMode = artMode;
+  document.body.dataset.mode = artMode;
+  document.querySelector('#mode-heading').textContent = artMode === 'rgb' ? 'RGB registration' : 'Source palette';
+  document.querySelector('#mode-description').textContent = artMode === 'rgb'
+    ? 'Every new stamp uses separate red, green, and blue spot inks.'
+    : 'Colors are sampled from each travel photograph.';
+  for (const option of document.querySelectorAll('.mode-option')) {
+    option.setAttribute('aria-pressed', String(option.dataset.mode === artMode));
+  }
+}
 
 async function loadJobs() {
   const filter = document.querySelector('#review-filter').value;
@@ -27,7 +40,7 @@ function renderJob(job) {
   card.dataset.review = job.review_status;
   card.querySelector('.job-number').textContent = `Record ${String(job.id).padStart(5, '0')}`;
   const pill = card.querySelector('.status-pill');
-  pill.textContent = `${job.status} · ${job.review_status}`;
+  pill.textContent = `${job.status} · ${job.art_mode || 'source'} · ${job.review_status}`;
   pill.dataset.status = job.status;
   const source = card.querySelector('.source-image');
   source.src = job.source_url;
@@ -64,6 +77,7 @@ async function regenerate(id, note) {
 
 async function loadStats() {
   const stats = await request('/api/stats');
+  applyMode(stats.art_mode || 'source');
   const complete = stats.statuses.complete || 0;
   document.querySelector('#progress-count').textContent = `${complete} / ${stats.total}`;
   document.querySelector('#progress-bar').style.width = `${stats.total ? complete / stats.total * 100 : 0}%`;
@@ -77,6 +91,7 @@ async function loadStats() {
   keyState.textContent = stats.api_key_available ? 'API key available to server' : 'API key missing — restart server after export';
   processButton.disabled = stats.running || !stats.api_key_available;
   stopButton.disabled = !stats.running || stats.stopping;
+  for (const option of document.querySelectorAll('.mode-option')) option.disabled = stats.running;
   if (wasRunning && !stats.running) {
     showMessage('Processing finished. Review the new proofs.');
     await loadJobs();
@@ -95,8 +110,8 @@ document.querySelector('#scan-button').addEventListener('click', async () => {
 processButton.addEventListener('click', async () => {
   try {
     const limit = Number(document.querySelector('#batch-limit').value);
-    await request('/api/process', {method: 'POST', body: JSON.stringify({limit})});
-    showMessage(`Started up to ${limit} impressions.`);
+    const result = await request('/api/process', {method: 'POST', body: JSON.stringify({limit})});
+    showMessage(`Started up to ${limit} ${result.art_mode.toUpperCase()} impressions.`);
     await loadStats();
   } catch (error) { showMessage(error.message); }
 });
@@ -108,6 +123,20 @@ stopButton.addEventListener('click', async () => {
     await loadStats();
   } catch (error) { showMessage(error.message); }
 });
+
+for (const option of document.querySelectorAll('.mode-option')) {
+  option.addEventListener('click', async () => {
+    if (option.dataset.mode === currentMode) return;
+    try {
+      const result = await request('/api/mode', {
+        method: 'POST',
+        body: JSON.stringify({art_mode: option.dataset.mode}),
+      });
+      applyMode(result.art_mode);
+      showMessage(`${result.art_mode === 'rgb' ? 'RGB' : 'Source palette'} mode selected for new impressions.`);
+    } catch (error) { showMessage(error.message); }
+  });
+}
 
 document.querySelector('#review-filter').addEventListener('change', loadJobs);
 Promise.all([loadJobs(), loadStats()]).catch(error => showMessage(error.message));

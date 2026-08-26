@@ -14,6 +14,12 @@ from typing import Any, Callable, Iterator
 from PIL import Image, ImageOps
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".heic", ".heif"}
+ART_MODES = {"source", "rgb"}
+RGB_PROMPT_OVERRIDE = """
+
+RGB MODE OVERRIDE:
+Ignore the source photograph's color palette. Print the stamp with exactly three spot inks only: pure red (#FF0000), pure green (#00A000), and pure blue (#0057FF). Use all three inks as independently carved and hand-pressed layers. Do not introduce black, gray, brown, ochre, cyan, magenta, yellow, white ink, or any additional color. Transparent gaps and dry-ink paper show-through are allowed and required. Keep the result recognizably rubber-stamped, not a smooth RGB digital illustration.
+""".strip()
 
 
 def now_iso() -> str:
@@ -68,6 +74,7 @@ def init_project(config: dict[str, Any]) -> None:
                 note TEXT NOT NULL DEFAULT '',
                 prompt_sha TEXT,
                 present INTEGER NOT NULL DEFAULT 1,
+                art_mode TEXT NOT NULL DEFAULT 'source',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -76,6 +83,14 @@ def init_project(config: dict[str, Any]) -> None:
         columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)").fetchall()}
         if "present" not in columns:
             db.execute("ALTER TABLE jobs ADD COLUMN present INTEGER NOT NULL DEFAULT 1")
+        if "art_mode" not in columns:
+            db.execute("ALTER TABLE jobs ADD COLUMN art_mode TEXT NOT NULL DEFAULT 'source'")
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        db.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('art_mode', 'source')"
+        )
         db.execute("CREATE INDEX IF NOT EXISTS jobs_status_idx ON jobs(status)")
         db.execute("CREATE INDEX IF NOT EXISTS jobs_review_idx ON jobs(review_status)")
 
@@ -165,8 +180,39 @@ def normalized_input(source_path: Path) -> Iterator[Path]:
         temporary_path.unlink(missing_ok=True)
 
 
-def write_derivatives(config: dict[str, Any], job: sqlite3.Row, image_bytes: bytes) -> dict[str, str]:
-    slug = slug_for_job(job)
+def get_art_mode(config: dict[str, Any]) -> str:
+    init_project(config)
+    with connect(config) as db:
+        row = db.execute("SELECT value FROM settings WHERE key = 'art_mode'").fetchone()
+    return row["value"] if row and row["value"] in ART_MODES else "source"
+
+
+def set_art_mode(config: dict[str, Any], art_mode: str) -> str:
+    if art_mode not in ART_MODES:
+        raise ValueError(f"Unknown art mode: {art_mode}")
+    init_project(config)
+    with connect(config) as db:
+        db.execute(
+            "INSERT INTO settings (key, value) VALUES ('art_mode', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (art_mode,),
+        )
+    return art_mode
+
+
+def build_prompt(config: dict[str, Any], note: str, art_mode: str) -> str:
+    prompt = config["prompt_file"].read_text(encoding="utf-8")
+    if art_mode == "rgb":
+        prompt += f"\n\n{RGB_PROMPT_OVERRIDE}"
+    if note.strip():
+        prompt += f"\n\nCorrection for this photograph only:\n{note.strip()}"
+    return prompt
+
+
+def write_derivatives(
+    config: dict[str, Any], job: sqlite3.Row, image_bytes: bytes, art_mode: str
+) -> dict[str, str]:
+    slug = f"{slug_for_job(job)}-{art_mode}"
     transparent_path = config["output_dir"] / "transparent" / f"{slug}.png"
     white_path = config["output_dir"] / "white" / f"{slug}.png"
     thumbnail_path = config["output_dir"] / "thumbnails" / f"{slug}.jpg"
@@ -201,9 +247,17 @@ def image_edit_parameters(config: dict[str, Any], image_file, prompt: str) -> di
     }
 
 
-def process_one(config: dict[str, Any], job_id: int, dry_run: bool = False) -> dict[str, Any]:
+def process_one(
+    config: dict[str, Any],
+    job_id: int,
+    dry_run: bool = False,
+    art_mode: str | None = None,
+) -> dict[str, Any]:
     if not dry_run and not os.environ.get("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is not available to the Stampbook server")
+    selected_mode = art_mode or get_art_mode(config)
+    if selected_mode not in ART_MODES:
+        raise ValueError(f"Unknown art mode: {selected_mode}")
     with connect(config) as db:
         job = db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         if job is None:
@@ -217,8 +271,9 @@ def process_one(config: dict[str, Any], job_id: int, dry_run: bool = False) -> d
         if job["attempts"] >= int(config["max_attempts"]):
             raise RuntimeError(f"Job {job_id} reached max_attempts; reset it before retrying")
         db.execute(
-            "UPDATE jobs SET status = 'processing', attempts = attempts + 1, error = NULL, updated_at = ? WHERE id = ?",
-            (now_iso(), job_id),
+            """UPDATE jobs SET status = 'processing', attempts = attempts + 1, error = NULL,
+            art_mode = ?, updated_at = ? WHERE id = ?""",
+            (selected_mode, now_iso(), job_id),
         )
 
     try:
@@ -233,16 +288,14 @@ def process_one(config: dict[str, Any], job_id: int, dry_run: bool = False) -> d
 
             from openai import OpenAI
 
-            prompt = config["prompt_file"].read_text(encoding="utf-8")
-            if job["note"].strip():
-                prompt += f"\n\nCorrection for this photograph only:\n{job['note'].strip()}"
+            prompt = build_prompt(config, job["note"], selected_mode)
             client = OpenAI()
             with image_path.open("rb") as image_file:
                 result = client.images.edit(**image_edit_parameters(config, image_file, prompt))
             encoded = result.data[0].b64_json
             if not encoded:
                 raise RuntimeError("Image API returned no image data")
-            paths = write_derivatives(config, job, base64.b64decode(encoded))
+            paths = write_derivatives(config, job, base64.b64decode(encoded), selected_mode)
 
         with connect(config) as db:
             db.execute(
@@ -250,7 +303,7 @@ def process_one(config: dict[str, Any], job_id: int, dry_run: bool = False) -> d
                 thumbnail_path = ?, prompt_sha = ?, error = NULL, updated_at = ? WHERE id = ?""",
                 (*paths.values(), prompt_digest(config["prompt_file"]), now_iso(), job_id),
             )
-        return {"id": job_id, "status": "complete", **paths}
+        return {"id": job_id, "status": "complete", "art_mode": selected_mode, **paths}
     except Exception as error:
         with connect(config) as db:
             db.execute(
@@ -265,7 +318,9 @@ def process_pending(
     limit: int,
     dry_run: bool = False,
     should_stop: Callable[[], bool] | None = None,
+    art_mode: str | None = None,
 ) -> list[dict[str, Any]]:
+    selected_mode = art_mode or get_art_mode(config)
     with connect(config) as db:
         rows = db.execute(
             "SELECT id FROM jobs WHERE present = 1 AND status IN ('pending', 'failed') AND attempts < ? ORDER BY id LIMIT ?",
@@ -276,7 +331,7 @@ def process_pending(
         if should_stop and should_stop():
             break
         try:
-            results.append(process_one(config, row["id"], dry_run=dry_run))
+            results.append(process_one(config, row["id"], dry_run=dry_run, art_mode=selected_mode))
         except Exception as error:
             results.append({"id": row["id"], "status": "failed", "error": str(error)})
     return results

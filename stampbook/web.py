@@ -8,7 +8,17 @@ from pathlib import Path
 from flask import Flask, abort, jsonify, render_template, request, send_file
 from PIL import Image, ImageOps
 
-from .core import connect, init_project, now_iso, process_pending, register_heif_if_available, scan_sources
+from .core import (
+    ART_MODES,
+    connect,
+    get_art_mode,
+    init_project,
+    now_iso,
+    process_pending,
+    register_heif_if_available,
+    scan_sources,
+    set_art_mode,
+)
 
 
 def row_to_dict(row):
@@ -56,8 +66,19 @@ def create_app(config):
             "statuses": statuses,
             "reviews": reviews,
             "api_key_available": bool(os.environ.get("OPENAI_API_KEY")),
+            "art_mode": get_art_mode(config),
             **worker_state,
         })
+
+    @app.post("/api/mode")
+    def mode():
+        if worker_state["running"]:
+            return jsonify({"error": "Stop the current batch before changing art mode"}), 409
+        body = request.get_json(silent=True) or {}
+        art_mode = body.get("art_mode")
+        if art_mode not in ART_MODES:
+            return jsonify({"error": "Art mode must be source or rgb"}), 400
+        return jsonify({"art_mode": set_art_mode(config, art_mode)})
 
     @app.post("/api/scan")
     def scan():
@@ -76,17 +97,20 @@ def create_app(config):
         stop_event.clear()
         worker_state["running"] = True
         worker_state["stopping"] = False
+        art_mode = get_art_mode(config)
 
         def run():
             try:
-                worker_state["last_results"] = process_pending(config, limit, should_stop=stop_event.is_set)
+                worker_state["last_results"] = process_pending(
+                    config, limit, should_stop=stop_event.is_set, art_mode=art_mode
+                )
             finally:
                 worker_state["running"] = False
                 worker_state["stopping"] = False
                 worker_lock.release()
 
         threading.Thread(target=run, daemon=True).start()
-        return jsonify({"started": True, "limit": limit}), 202
+        return jsonify({"started": True, "limit": limit, "art_mode": art_mode}), 202
 
     @app.post("/api/stop")
     def stop():

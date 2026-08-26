@@ -48,6 +48,13 @@ stampbook serve
 
 Open [http://127.0.0.1:7331](http://127.0.0.1:7331). Scan for newly added files, process a controlled number, approve or reject proofs, and queue individual records for regeneration. A correction note is appended only to that photograph's next generation; the shared `prompt.txt` remains the base prompt for consistent batches.
 
+The large mode switch at the top controls new generations:
+
+- **Source palette** extracts restrained spot inks from each photograph.
+- **RGB** overrides the palette with separate red, green, and blue rubber-stamp inks.
+
+The selected mode is saved locally. A running batch keeps the mode it started with, so the switch is disabled until that batch finishes or stops. Output filenames include `source` or `rgb` to prevent one mode from silently overwriting the other.
+
 ## Safety and recovery
 
 - Source files are never written or deleted.
